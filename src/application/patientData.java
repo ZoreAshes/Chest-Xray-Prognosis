@@ -13,8 +13,13 @@ public class patientData {
     private String imagePath;
     private LocalDate admissionDate;
     private String status;
+    private String prognosis;
 
     public patientData(int patientId, String name, int age, String gender, String phoneNumber, String bloodGroup, String imagePath, LocalDate admissionDate, String status) {
+        this(patientId, name, age, gender, phoneNumber, bloodGroup, imagePath, admissionDate, status, null);
+    }
+
+    public patientData(int patientId, String name, int age, String gender, String phoneNumber, String bloodGroup, String imagePath, LocalDate admissionDate, String status, String prognosis) {
         this.patientId = patientId;
         this.name = name;
         this.age = age;
@@ -24,6 +29,7 @@ public class patientData {
         this.imagePath = imagePath;
         this.admissionDate = admissionDate;
         this.status = status;
+        this.prognosis = prognosis;
     }
 
     public Integer getPatientId() { return patientId; }
@@ -35,4 +41,5 @@ public class patientData {
     public String getImage() { return imagePath; }
     public LocalDate getAdmissionDate() { return admissionDate; }
     public String getStatus() { return status; }
+    public String getPrognosis() { return prognosis; }
 }

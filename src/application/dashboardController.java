@@ -1,15 +1,30 @@
 package application;
 
 import java.io.File;
+import java.net.URI;
 import java.net.URL;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDate;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import javafx.application.Platform;
 import java.util.ResourceBundle;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -42,6 +57,12 @@ import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
 public class dashboardController implements Initializable {
+
+    private static final String API_BASE_URL = "http://127.0.0.1:5000/api";
+    private static final String API_PREDICT_URL = API_BASE_URL + "/predict";
+    private static final Duration API_TIMEOUT = Duration.ofSeconds(20);
+    private static final String IMAGE_STORAGE_DIR = "data/images";
+    private static final boolean USE_DATABASE = false;
 
     @FXML
     private AnchorPane main_form;
@@ -155,6 +176,49 @@ public class dashboardController implements Initializable {
     private Label home_totalInactivePa;
 
     private Image image;
+    private String lastPrediction;
+    private String lastConfidence;
+    private boolean hasPrognosisColumn;
+    private final ObservableList<patientData> testPatientList = FXCollections.observableArrayList();
+
+    @FXML
+    private Button salary_btn;
+
+    @FXML
+    private AnchorPane salary_form;
+
+    @FXML
+    private TableView<patientData> patientDetails_tableView;
+
+    @FXML
+    private TableColumn<patientData, Integer> patientDetails_col_patientID;
+
+    @FXML
+    private TableColumn<patientData, String> patientDetails_col_name;
+
+    @FXML
+    private TableColumn<patientData, Integer> patientDetails_col_age;
+
+    @FXML
+    private TableColumn<patientData, String> patientDetails_col_bloodGroup;
+
+    @FXML
+    private TableColumn<patientData, String> patientDetails_col_prognosis;
+
+    @FXML
+    private TextField patientDetails_patientID;
+
+    @FXML
+    private Label patientDetails_name;
+
+    @FXML
+    private Label patientDetails_age;
+
+    @FXML
+    private Label patientDetails_bloodGroup;
+
+    @FXML
+    private TextField patientDetails_prognosis;
 
    public void homePatientTotalPatients() {
     String sql = "SELECT COUNT(patientID) AS total FROM patient";
@@ -240,12 +304,15 @@ public class dashboardController implements Initializable {
         LocalDate date = LocalDate.now();
         java.sql.Date sqlDate = java.sql.Date.valueOf(date);
 
-        String checkSql = "SELECT patientID FROM patient WHERE patientID = ?";
-        String insertSql = "INSERT INTO patient "
-                + "(patientID, name, age, gender, phoneNumber, bloodGroup, image, admissionDate, status) "
-                + "VALUES(?,?,?,?,?,?,?,?,?)";
-
-        connect = database.connectDb();
+        // String checkSql = "SELECT patientID FROM patient WHERE patientID = ?";
+        // String insertSql = "INSERT INTO patient "
+        //         + "(patientID, name, age, gender, phoneNumber, bloodGroup, image, admissionDate, status) "
+        //         + "VALUES(?,?,?,?,?,?,?,?,?)";
+        // String insertSqlWithPrognosis = "INSERT INTO patient "
+        //         + "(patientID, name, age, gender, phoneNumber, bloodGroup, image, admissionDate, status, prognosis) "
+        //         + "VALUES(?,?,?,?,?,?,?,?,?,?)";
+        //
+        // connect = database.connectDb();
 
         try {
 
@@ -265,37 +332,68 @@ public class dashboardController implements Initializable {
             int patientId = Integer.parseInt(addPatient_patientID.getText());
             int age = Integer.parseInt(addPatient_age.getText());
 
-            prepare = connect.prepareStatement(checkSql);
-            prepare.setInt(1, patientId);
-            result = prepare.executeQuery();
+            String prognosisValue = buildPrognosisValue();
+            if (!USE_DATABASE) {
+                int existingIndex = findTestPatientIndex(patientId);
+                if (existingIndex >= 0) {
+                    showAlert(Alert.AlertType.ERROR, "Patient ID already exists!");
+                    return;
+                }
 
-            if (result.next()) {
-                showAlert(Alert.AlertType.ERROR, "Patient ID already exists!");
-                return;
+                patientData patient = new patientData(
+                        patientId,
+                        addPatient_name.getText(),
+                        age,
+                        addPatient_gender.getValue().toString(),
+                        addPatient_phoneNumber.getText(),
+                        addPatient_bloodGroup.getValue().toString(),
+                        getData.path,
+                        date,
+                        addPatient_status.getValue().toString(),
+                        prognosisValue
+                );
+                testPatientList.add(patient);
+            } else {
+                // prepare = connect.prepareStatement(checkSql);
+                // prepare.setInt(1, patientId);
+                // result = prepare.executeQuery();
+                //
+                // if (result.next()) {
+                //     showAlert(Alert.AlertType.ERROR, "Patient ID already exists!");
+                //     return;
+                // }
+                //
+                // if (hasPrognosisColumn) {
+                //     prepare = connect.prepareStatement(insertSqlWithPrognosis);
+                // } else {
+                //     prepare = connect.prepareStatement(insertSql);
+                // }
+                // prepare.setInt(1, patientId);
+                // prepare.setString(2, addPatient_name.getText());
+                // prepare.setInt(3, age);
+                // prepare.setString(4, addPatient_gender.getValue().toString());
+                // prepare.setString(5, addPatient_phoneNumber.getText());
+                // prepare.setString(6, addPatient_bloodGroup.getValue().toString());
+                // prepare.setString(7, getData.path);
+                // prepare.setString(9, addPatient_status.getValue().toString());
+                // prepare.setDate(8, sqlDate);
+                // if (hasPrognosisColumn) {
+                //     prepare.setString(10, prognosisValue);
+                // }
+                //
+                // prepare.executeUpdate();
             }
-
-            prepare = connect.prepareStatement(insertSql);
-            prepare.setInt(1, patientId);
-            prepare.setString(2, addPatient_name.getText());
-            prepare.setInt(3, age);
-            prepare.setString(4, addPatient_gender.getValue().toString());
-            prepare.setString(5, addPatient_phoneNumber.getText());
-            prepare.setString(6, addPatient_bloodGroup.getValue().toString());
-            prepare.setString(7, getData.path);
-            prepare.setString(9, addPatient_status.getValue().toString());
-            prepare.setDate(8, sqlDate);
-
-            prepare.executeUpdate();
 
             showAlert(Alert.AlertType.INFORMATION, "Patient Added Successfully!");
 
             addPatientShowListData();
+            patientDetailsShowListData();
             addPatientReset();
 
         } catch (NumberFormatException e) {
             showAlert(Alert.AlertType.ERROR, "Patient ID and Age must be numbers.");
         } catch (Exception e) {
-            e.printStackTrace();
+            showAlert(Alert.AlertType.ERROR, "Failed to add patient: " + e.getMessage());
         }
     }
 
@@ -305,18 +403,29 @@ public class dashboardController implements Initializable {
         LocalDate date = LocalDate.now();
         java.sql.Date sqlDate = java.sql.Date.valueOf(date);
 
-        String updateSql = "UPDATE patient SET "
-                + "name = ?, "
-                + "age = ?, "
-                + "gender = ?, "
-                + "phoneNumber = ?, "
-                + "bloodGroup = ?, "
-                + "image = ?, "
-                + "admissionDate = ?, "
-                + "status = ? "
-                + "WHERE patientID = ?";
-
-        connect = database.connectDb();
+        // String updateSql = "UPDATE patient SET "
+        //         + "name = ?, "
+        //         + "age = ?, "
+        //         + "gender = ?, "
+        //         + "phoneNumber = ?, "
+        //         + "bloodGroup = ?, "
+        //         + "image = ?, "
+        //         + "admissionDate = ?, "
+        //         + "status = ? "
+        //         + "WHERE patientID = ?";
+        // String updateSqlWithPrognosis = "UPDATE patient SET "
+        //         + "name = ?, "
+        //         + "age = ?, "
+        //         + "gender = ?, "
+        //         + "phoneNumber = ?, "
+        //         + "bloodGroup = ?, "
+        //         + "image = ?, "
+        //         + "admissionDate = ?, "
+        //         + "status = ?, "
+        //         + "prognosis = ? "
+        //         + "WHERE patientID = ?";
+        //
+        // connect = database.connectDb();
 
         try {
 
@@ -345,38 +454,71 @@ public class dashboardController implements Initializable {
 
                 int patientId = Integer.parseInt(addPatient_patientID.getText());
                 int age = Integer.parseInt(addPatient_age.getText());
+                String prognosisValue = buildPrognosisValue();
 
-                prepare = connect.prepareStatement(updateSql);
+                if (!USE_DATABASE) {
+                    int existingIndex = findTestPatientIndex(patientId);
+                    if (existingIndex < 0) {
+                        showAlert(Alert.AlertType.ERROR, "Patient ID not found.");
+                        return;
+                    }
 
-                prepare.setString(1, addPatient_name.getText());
-                prepare.setInt(2, age);
-                prepare.setString(3, addPatient_gender.getValue().toString());
-                prepare.setString(4, addPatient_phoneNumber.getText());
-                prepare.setString(5, addPatient_bloodGroup.getValue().toString());
-                prepare.setString(6, getData.path);
-                prepare.setDate(7, sqlDate);
-                prepare.setString(8, addPatient_status.getValue().toString());
-                prepare.setInt(9, patientId);
-
-                prepare.executeUpdate();
+                    patientData patient = new patientData(
+                            patientId,
+                            addPatient_name.getText(),
+                            age,
+                            addPatient_gender.getValue().toString(),
+                            addPatient_phoneNumber.getText(),
+                            addPatient_bloodGroup.getValue().toString(),
+                            getData.path,
+                            date,
+                            addPatient_status.getValue().toString(),
+                            prognosisValue
+                    );
+                    testPatientList.set(existingIndex, patient);
+                } else {
+                    // if (hasPrognosisColumn) {
+                    //     prepare = connect.prepareStatement(updateSqlWithPrognosis);
+                    // } else {
+                    //     prepare = connect.prepareStatement(updateSql);
+                    // }
+                    //
+                    // prepare.setString(1, addPatient_name.getText());
+                    // prepare.setInt(2, age);
+                    // prepare.setString(3, addPatient_gender.getValue().toString());
+                    // prepare.setString(4, addPatient_phoneNumber.getText());
+                    // prepare.setString(5, addPatient_bloodGroup.getValue().toString());
+                    // prepare.setString(6, getData.path);
+                    // prepare.setDate(7, sqlDate);
+                    // prepare.setString(8, addPatient_status.getValue().toString());
+                    // if (hasPrognosisColumn) {
+                    //     prepare.setString(9, prognosisValue);
+                    //     prepare.setInt(10, patientId);
+                    // } else {
+                    //     prepare.setInt(9, patientId);
+                    // }
+                    //
+                    // prepare.executeUpdate();
+                }
 
                 showAlert(Alert.AlertType.INFORMATION, "Patient Updated Successfully!");
 
                 addPatientShowListData();
+                patientDetailsShowListData();
                 addPatientReset();
             }
 
         } catch (NumberFormatException e) {
             showAlert(Alert.AlertType.ERROR, "Patient ID and Age must be numbers.");
         } catch (Exception e) {
-            e.printStackTrace();
+            showAlert(Alert.AlertType.ERROR, "Failed to update patient: " + e.getMessage());
         }
     }
     public void addPatientDelete() {
 
-        String deleteSql = "DELETE FROM patient WHERE patientID = ?";
-
-        connect = database.connectDb();
+        // String deleteSql = "DELETE FROM patient WHERE patientID = ?";
+        //
+        // connect = database.connectDb();
 
         try {
 
@@ -397,9 +539,18 @@ public class dashboardController implements Initializable {
 
                 int patientId = Integer.parseInt(addPatient_patientID.getText());
 
-                prepare = connect.prepareStatement(deleteSql);
-                prepare.setInt(1, patientId);
-                prepare.executeUpdate();
+                if (!USE_DATABASE) {
+                    int existingIndex = findTestPatientIndex(patientId);
+                    if (existingIndex < 0) {
+                        showAlert(Alert.AlertType.ERROR, "Patient ID not found.");
+                        return;
+                    }
+                    testPatientList.remove(existingIndex);
+                } else {
+                    // prepare = connect.prepareStatement(deleteSql);
+                    // prepare.setInt(1, patientId);
+                    // prepare.executeUpdate();
+                }
 
                 showAlert(Alert.AlertType.INFORMATION, "Patient Deleted Successfully!");
 
@@ -426,6 +577,8 @@ public class dashboardController implements Initializable {
         addPatient_status.getSelectionModel().clearSelection();
 
         getData.path = "";
+        lastPrediction = null;
+        lastConfidence = null;
     }
 
     public void addPatientInsertImage() {
@@ -439,11 +592,124 @@ public class dashboardController implements Initializable {
         File file = open.showOpenDialog(main_form.getScene().getWindow());
 
         if (file != null) {
-            getData.path = file.getAbsolutePath();
+            try {
+                getData.path = storeImage(file);
+            } catch (Exception e) {
+                showAlert(Alert.AlertType.ERROR, "Failed to store image: " + e.getMessage());
+                return;
+            }
 
             Image image = new Image(file.toURI().toString(), 101, 127, false, true);
             addPatient_image.setImage(image);
+            requestPredictionAsync(file);
         }
+    }
+
+    private void requestPredictionAsync(File file) {
+        Thread worker = new Thread(() -> {
+            try {
+                String response = requestPrediction(file);
+                String prediction = extractJsonValue(response, "prediction");
+                String confidence = extractJsonValue(response, "confidence");
+                lastPrediction = prediction;
+                lastConfidence = confidence;
+                String message = formatPredictionMessage(response);
+                Platform.runLater(() -> {
+                    if (prediction != null && patientDetails_prognosis != null) {
+                        patientDetails_prognosis.setText(buildPrognosisValue());
+                    }
+                    showAlert(Alert.AlertType.INFORMATION, message);
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> showAlert(Alert.AlertType.ERROR,
+                        "Prediction request failed: " + e.getMessage()));
+            }
+        });
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private String requestPrediction(File file) throws Exception {
+        String boundary = "----JavaFXBoundary" + UUID.randomUUID();
+        byte[] body = buildMultipartBody(file, boundary);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(API_PREDICT_URL))
+                .timeout(API_TIMEOUT)
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+                .build();
+
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(API_TIMEOUT)
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            return "Prediction failed: HTTP " + response.statusCode() + " - " + response.body();
+        }
+
+        return response.body();
+    }
+
+    private byte[] buildMultipartBody(File file, String boundary) throws Exception {
+        String lineBreak = "\r\n";
+        StringBuilder header = new StringBuilder();
+        header.append("--").append(boundary).append(lineBreak);
+        header.append("Content-Disposition: form-data; name=\"file\"; filename=\"")
+                .append(file.getName()).append("\"").append(lineBreak);
+        header.append("Content-Type: ").append(guessContentType(file.getName())).append(lineBreak);
+        header.append(lineBreak);
+
+        byte[] headerBytes = header.toString().getBytes(StandardCharsets.UTF_8);
+        byte[] fileBytes = Files.readAllBytes(file.toPath());
+        byte[] footerBytes = (lineBreak + "--" + boundary + "--" + lineBreak)
+                .getBytes(StandardCharsets.UTF_8);
+
+        byte[] body = new byte[headerBytes.length + fileBytes.length + footerBytes.length];
+        System.arraycopy(headerBytes, 0, body, 0, headerBytes.length);
+        System.arraycopy(fileBytes, 0, body, headerBytes.length, fileBytes.length);
+        System.arraycopy(footerBytes, 0, body, headerBytes.length + fileBytes.length, footerBytes.length);
+        return body;
+    }
+
+    private String guessContentType(String filename) {
+        String lower = filename.toLowerCase();
+        if (lower.endsWith(".png")) {
+            return "image/png";
+        }
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+            return "image/jpeg";
+        }
+        return "application/octet-stream";
+    }
+
+    private String formatPredictionMessage(String json) {
+        String prediction = extractJsonValue(json, "prediction");
+        String confidence = extractJsonValue(json, "confidence");
+        if (prediction == null) {
+            return "Prediction response: " + json;
+        }
+        if (confidence == null) {
+            return "Prediction: " + prediction;
+        }
+        return "Prediction: " + prediction + " (confidence " + confidence + ")";
+    }
+
+    private String extractJsonValue(String json, String key) {
+        Pattern pattern = Pattern.compile("\"" + key + "\"\\s*:\\s*\"?([^\",}]+)\"?");
+        Matcher matcher = pattern.matcher(json);
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
+    private String buildPrognosisValue() {
+        if (lastPrediction == null || lastPrediction.isEmpty()) {
+            return "Pending";
+        }
+        if (lastConfidence == null || lastConfidence.isEmpty()) {
+            return lastPrediction;
+        }
+        return lastPrediction + " (" + lastConfidence + ")";
     }
 
     private final String[] b_groupList = {"A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"};
@@ -473,13 +739,16 @@ public class dashboardController implements Initializable {
             return;
         }
 
+        if (!addPatient_status.getItems().isEmpty()) {
+            return;
+        }
+
         ObservableList<String> listData = FXCollections.observableArrayList(
                 "Active",
                 "Inactive"
         );
 
-        addPatient_status.getItems().clear();   // clear first
-        addPatient_status.setItems(listData);   // set only once
+        addPatient_status.setItems(listData);
 
     }
 
@@ -527,37 +796,43 @@ public class dashboardController implements Initializable {
     private ResultSet result;
     public ObservableList<patientData> addPatientListData() {
 
-        ObservableList<patientData> listData = FXCollections.observableArrayList();
-        String sql = "SELECT * FROM patient";
-
-        connect = database.connectDb();
-
-        try {
-            prepare = connect.prepareStatement(sql);
-            result = prepare.executeQuery();
-
-            while (result.next()) {
-
-                patientData patient = new patientData(
-                        result.getInt("patientID"),
-                        result.getString("name"),
-                        result.getInt("age"),
-                        result.getString("gender"),
-                        result.getString("phoneNumber"),
-                        result.getString("bloodGroup"),
-                        result.getString("image"),
-                        result.getDate("admissionDate").toLocalDate(),
-                        result.getString("status")
-                );
-
-                listData.add(patient);
-            }
-
-        } catch (Exception e) {
-            e.printStackTrace();
+        if (!USE_DATABASE) {
+            return testPatientList;
         }
 
-        return listData;
+        // ObservableList<patientData> listData = FXCollections.observableArrayList();
+        // String sql = "SELECT * FROM patient";
+        //
+        // connect = database.connectDb();
+        //
+        // try {
+        //     prepare = connect.prepareStatement(sql);
+        //     result = prepare.executeQuery();
+        //
+        //     while (result.next()) {
+        //
+        //         patientData patient = new patientData(
+        //                 result.getInt("patientID"),
+        //                 result.getString("name"),
+        //                 result.getInt("age"),
+        //                 result.getString("gender"),
+        //                 result.getString("phoneNumber"),
+        //                 result.getString("bloodGroup"),
+        //                 result.getString("image"),
+        //                 result.getDate("admissionDate").toLocalDate(),
+        //                 result.getString("status"),
+        //                 getOptionalString(result, "prognosis")
+        //         );
+        //
+        //         listData.add(patient);
+        //     }
+        //
+        // } catch (Exception e) {
+        //     e.printStackTrace();
+        // }
+        //
+        // return listData;
+        return FXCollections.observableArrayList();
     }
     private ObservableList<patientData> addPatientList;
 
@@ -589,11 +864,18 @@ public class dashboardController implements Initializable {
         addPatient_status.setValue(String.valueOf(selectedPatient.getStatus()));
         addPatient_age.setText(String.valueOf(selectedPatient.getAge()));
         addPatient_phoneNumber.setText(selectedPatient.getPhoneNum());
+        addPatient_gender.setValue(selectedPatient.getGender());
+        addPatient_bloodGroup.setValue(selectedPatient.getBloodGroup());
 
         getData.path = selectedPatient.getImage();
-        String uri = "file:" + selectedPatient.getImage();
-        Image image = new Image(uri, 101, 127, false, true);
-        addPatient_image.setImage(image);
+        String resolvedPath = resolveImagePath(selectedPatient.getImage());
+        if (resolvedPath == null) {
+            addPatient_image.setImage(null);
+        } else {
+            String uri = "file:" + resolvedPath;
+            Image image = new Image(uri, 101, 127, false, true);
+            addPatient_image.setImage(image);
+        }
     }
 
     /*public void salaryUpdate() {
@@ -713,9 +995,11 @@ public class dashboardController implements Initializable {
 
             home_form.setVisible(true);
             addPatient_form.setVisible(false);
+            salary_form.setVisible(false);
 
             home_btn.setStyle("-fx-background-color:linear-gradient(to bottom right, #3a4368, #28966c);");
             addPatient_btn.setStyle("-fx-background-color:transparent");
+            salary_btn.setStyle("-fx-background-color:transparent");
 
             homePatientTotalPatients();
             homeTotalInactive();
@@ -725,9 +1009,22 @@ public class dashboardController implements Initializable {
 
             home_form.setVisible(false);
             addPatient_form.setVisible(true);
+            salary_form.setVisible(false);
 
             addPatient_btn.setStyle("-fx-background-color:linear-gradient(to bottom right, #3a4368, #28966c);");
             home_btn.setStyle("-fx-background-color:transparent");
+            salary_btn.setStyle("-fx-background-color:transparent");
+        } else if (event.getSource() == salary_btn) {
+
+            home_form.setVisible(false);
+            addPatient_form.setVisible(false);
+            salary_form.setVisible(true);
+
+            salary_btn.setStyle("-fx-background-color:linear-gradient(to bottom right, #3a4368, #28966c);");
+            home_btn.setStyle("-fx-background-color:transparent");
+            addPatient_btn.setStyle("-fx-background-color:transparent");
+
+            patientDetailsShowListData();
         }
     }
 
@@ -785,6 +1082,201 @@ public class dashboardController implements Initializable {
         stage.setIconified(true);
     }
 
+    public void patientDetailsShowListData() {
+        ObservableList<patientData> listData = patientDetailsListData();
+
+        patientDetails_col_patientID.setCellValueFactory(new PropertyValueFactory<>("patientId"));
+        patientDetails_col_name.setCellValueFactory(new PropertyValueFactory<>("name"));
+        patientDetails_col_age.setCellValueFactory(new PropertyValueFactory<>("age"));
+        patientDetails_col_bloodGroup.setCellValueFactory(new PropertyValueFactory<>("bloodGroup"));
+        patientDetails_col_prognosis.setCellValueFactory(new PropertyValueFactory<>("prognosis"));
+
+        patientDetails_tableView.setItems(listData);
+    }
+
+    public ObservableList<patientData> patientDetailsListData() {
+        if (!USE_DATABASE) {
+            return testPatientList;
+        }
+
+        // ObservableList<patientData> listData = FXCollections.observableArrayList();
+        // String sql = "SELECT * FROM patient";
+        //
+        // connect = database.connectDb();
+        //
+        // try {
+        //     prepare = connect.prepareStatement(sql);
+        //     result = prepare.executeQuery();
+        //
+        //     while (result.next()) {
+        //         patientData patient = new patientData(
+        //                 result.getInt("patientID"),
+        //                 result.getString("name"),
+        //                 result.getInt("age"),
+        //                 result.getString("gender"),
+        //                 result.getString("phoneNumber"),
+        //                 result.getString("bloodGroup"),
+        //                 result.getString("image"),
+        //                 result.getDate("admissionDate").toLocalDate(),
+        //                 result.getString("status"),
+        //                 getOptionalString(result, "prognosis")
+        //         );
+        //         listData.add(patient);
+        //     }
+        // } catch (Exception e) {
+        //     e.printStackTrace();
+        // }
+        //
+        // return listData;
+        return FXCollections.observableArrayList();
+    }
+
+    public void patientDetailsSelect() {
+        patientData selectedPatient = patientDetails_tableView.getSelectionModel().getSelectedItem();
+        int selectedIndex = patientDetails_tableView.getSelectionModel().getSelectedIndex();
+
+        if (selectedPatient == null || selectedIndex < 0) {
+            return;
+        }
+
+        patientDetails_patientID.setText(String.valueOf(selectedPatient.getPatientId()));
+        patientDetails_name.setText(selectedPatient.getName());
+        patientDetails_age.setText(String.valueOf(selectedPatient.getAge()));
+        patientDetails_bloodGroup.setText(selectedPatient.getBloodGroup());
+        patientDetails_prognosis.setText(selectedPatient.getPrognosis());
+    }
+
+    public void patientDetailsUpdate() {
+        if (patientDetails_patientID.getText().isEmpty()) {
+            showAlert(Alert.AlertType.ERROR, "Please enter Patient ID.");
+            return;
+        }
+
+        try {
+            int patientId = Integer.parseInt(patientDetails_patientID.getText());
+            String prognosisValue = patientDetails_prognosis.getText();
+
+            if (!USE_DATABASE) {
+                int existingIndex = findTestPatientIndex(patientId);
+                if (existingIndex < 0) {
+                    showAlert(Alert.AlertType.ERROR, "Patient ID not found.");
+                    return;
+                }
+                patientData current = testPatientList.get(existingIndex);
+                patientData updated = new patientData(
+                        current.getPatientId(),
+                        current.getName(),
+                        current.getAge(),
+                        current.getGender(),
+                        current.getPhoneNum(),
+                        current.getBloodGroup(),
+                        current.getImage(),
+                        current.getAdmissionDate(),
+                        current.getStatus(),
+                        prognosisValue
+                );
+                testPatientList.set(existingIndex, updated);
+            } else {
+                if (!hasPrognosisColumn) {
+                    showAlert(Alert.AlertType.ERROR, "Database is missing prognosis column.");
+                    return;
+                }
+
+                // String sql = "UPDATE patient SET prognosis = ? WHERE patientID = ?";
+                //
+                // connect = database.connectDb();
+                //
+                // prepare = connect.prepareStatement(sql);
+                // prepare.setString(1, prognosisValue);
+                // prepare.setInt(2, patientId);
+                // prepare.executeUpdate();
+            }
+
+            showAlert(Alert.AlertType.INFORMATION, "Patient prognosis updated.");
+            patientDetailsShowListData();
+        } catch (NumberFormatException e) {
+            showAlert(Alert.AlertType.ERROR, "Patient ID must be a number.");
+        } catch (Exception e) {
+            showAlert(Alert.AlertType.ERROR, "Failed to update prognosis: " + e.getMessage());
+        }
+    }
+
+    public void patientDetailsReset() {
+        patientDetails_patientID.setText("");
+        patientDetails_name.setText("");
+        patientDetails_age.setText("");
+        patientDetails_bloodGroup.setText("");
+        patientDetails_prognosis.setText("");
+    }
+
+    private String storeImage(File file) throws Exception {
+        String filename = UUID.randomUUID().toString().replace("-", "");
+        String extension = getFileExtension(file.getName());
+        if (!extension.isEmpty()) {
+            filename = filename + "." + extension;
+        }
+
+        Path dir = Paths.get(IMAGE_STORAGE_DIR);
+        Files.createDirectories(dir);
+        Path target = dir.resolve(filename);
+        Files.copy(file.toPath(), target, StandardCopyOption.REPLACE_EXISTING);
+        return filename;
+    }
+
+    private String getFileExtension(String filename) {
+        int dotIndex = filename.lastIndexOf('.');
+        if (dotIndex < 0 || dotIndex == filename.length() - 1) {
+            return "";
+        }
+        return filename.substring(dotIndex + 1);
+    }
+
+    private String resolveImagePath(String storedPath) {
+        if (storedPath == null || storedPath.isEmpty()) {
+            return null;
+        }
+        Path path = Paths.get(storedPath);
+        if (path.isAbsolute()) {
+            return path.toString();
+        }
+        Path base = Paths.get(IMAGE_STORAGE_DIR);
+        if (path.startsWith(base)) {
+            return path.toAbsolutePath().toString();
+        }
+        return base.resolve(path).toAbsolutePath().toString();
+    }
+
+    private boolean checkColumnExists(String table, String column) {
+        try (Connection connection = database.connectDb()) {
+            if (connection == null) {
+                return false;
+            }
+            try (ResultSet columns = connection.getMetaData().getColumns(null, null, table, column)) {
+                return columns.next();
+            }
+        } catch (SQLException e) {
+            return false;
+        }
+    }
+
+    private String getOptionalString(ResultSet resultSet, String column) {
+        try {
+            resultSet.findColumn(column);
+            return resultSet.getString(column);
+        } catch (SQLException e) {
+            return null;
+        }
+    }
+
+    private int findTestPatientIndex(int patientId) {
+        for (int i = 0; i < testPatientList.size(); i++) {
+            if (testPatientList.get(i).getPatientId() == patientId) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     @Override
     public void initialize(URL location, ResourceBundle resources) {
 
@@ -793,12 +1285,16 @@ public class dashboardController implements Initializable {
 
         home_form.setVisible(true);
         addPatient_form.setVisible(false);
+        salary_form.setVisible(false);
 
         homePatientTotalPatients();
         homeTotalInactive();
         homeChart();
 
         addPatientShowListData();
+        patientDetailsShowListData();
+
+        hasPrognosisColumn = USE_DATABASE && checkColumnExists("patient", "prognosis");
 
         addPatientGenderList();
         addPatientBloodGroupList();
